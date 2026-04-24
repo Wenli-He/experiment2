@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>jsPsych test</title>
+
+  <!-- jsPsych核心 -->
+  <script src="https://unpkg.com/jspsych@7.3.0"></script>
+  <link href="https://unpkg.com/jspsych@7.3.0/css/jspsych.css" rel="stylesheet">
+  <script src="https://unpkg.com/d3@7"></script>
+
+  <!-- 插件 -->
+  <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-button-response"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-survey-html-form"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-slider-response"></script>
+
+</head>
+
+<body></body>
+
+<script>
+
+let all_trials = [];
+
+// 初始化
+const jsPsych = initJsPsych({
+  on_finish: function(){
+
+    let data = jsPsych.data.get().filter({stage: "final"}).values();
+
+    // ⭐ 存结果
+    let summary = {};
+
+    // 被试ID
+    summary.subject_id = jsPsych.data.get().values()[0].subject_id;
+
+    // ===== 分组 =====
+    data.forEach(function(d){
+
+      let key = d.block + "_" + d.type; 
+      // 例如：AI_high_emotion
+
+      if(!summary[key]){
+        summary[key] = {
+          initial: [],
+          final: [],
+          WOA: []
+        };
+      }
+
+      summary[key].initial.push(d.initial);
+      summary[key].final.push(d.final);
+      summary[key].WOA.push(d.WOA);
+    });
+
+    // ===== 计算均值 =====
+    let result = {};
+
+    result.subject_id = summary.subject_id;
+
+    for(let key in summary){
+
+      let s = summary[key];
+
+      let mean = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+
+      result[key+"_initial_mean"] = mean(s.initial);
+      result[key+"_final_mean"] = mean(s.final);
+      result[key+"_WOA_mean"] = mean(s.WOA);
+
+    }
+
+    // ===== 转成CSV =====
+    let csv = Object.keys(result).join(",") + "\n" +
+              Object.values(result).join(",");
+
+    // ===== 下载 =====
+    let blob = new Blob([csv], {type: "text/csv"});
+    let url = URL.createObjectURL(blob);
+
+    let a = document.createElement("a");
+    a.href = url;
+    a.download = "summary_data.csv";
+    a.click();
+
+  }
+});
+
+// ====== 建议生成函数 ======
+function generateAdvice(initial, direction){
+
+  let change = Math.floor(Math.random() * 11) + 15;
+  let advice = direction === "increase" ? initial + change : initial - change;
+
+  if(advice > 100) advice = initial - change;
+  if(advice < 0) advice = initial + change;
+
+  return Math.max(0, Math.min(100, Math.round(advice)));
+}
+
+// ====== 人口学 ======
+const demographics = {
+  type: jsPsychSurveyHtmlForm,
+  preamble: "<h2>基本信息调查</h2>",
+  html: `
+    <p>性别：</p>
+    <select name="gender" required>
+      <option value="">请选择</option>
+      <option value="male">男</option>
+      <option value="female">女</option>
+    </select>
+
+    <p>年龄：</p>
+    <input name="age" type="number" required />
+
+    <p>支付宝账号（仅用于被试费发放）：</p>
+    <input name="alipay" type="text" required />
+  `,
+  button_label: "继续",
+
+  on_finish: function(data){
+    let r = data.response;
+
+    jsPsych.data.addProperties({
+      gender: r.gender,
+      age: r.age,
+      subject_id: jsPsych.randomization.randomID(8)
+    });
+  }
+};
+
+// ====== 总指导语 ======
+const intro = {
+  type: jsPsychHtmlButtonResponse,
+  stimulus: `
+    <h2>实验说明</h2>
+    <p>在本研究中，你将阅读一系列不同的困扰情境。</p>
+    <p>请尽量设身处地地想象每一个情境，并根据你的真实想法做出判断。</p>
+    <p>在每个情境中，你首先需要做出自己的初始判断。</p>
+    <p>接着你将收到来自某个咨询来源的建议, 来自某个人或某个AI, 你可以参考该建议并再次做出判断。</p>
+    <p>请根据你的真实想法进行选择，没有绝对正确或错误的答案，我们关注的是你在不同情况下的真实决策过程。</p>
+  `,
+  choices: ["开始实验"]
+};
+
+function startExperiment(){
+
+  let timeline = [];
+
+  timeline.push(demographics);
+  timeline.push(intro);
+
+  all_blocks.forEach(function(block){
+
+    // block说明
+    timeline.push({
+      type: jsPsychHtmlButtonResponse,
+      stimulus: `<p>${block.instruction}</p>`,
+      choices: ["开始"]
+    });
+
+    // ⭐筛选该block的trial
+    let block_trials = all_trials.filter(t => t.block === block.block);
+
+    // ⭐随机顺序
+    block_trials = jsPsych.randomization.shuffle(block_trials);
+
+    // ⭐循环8个trial
+    block_trials.forEach(function(trial, index){
+
+      // ===== 页面1：情境 + 初始判断 =====
+      timeline.push({
+        type: jsPsychSurveyHtmlForm,
+        preamble: `
+          <p>${trial.situation}</p>
+          <p>0 = ${trial.option_low}，100 = ${trial.option_high}</p>
+        `,
+        html: `<input name="initial" type="number" min="0" max="100" required />`,
+        button_label: "提交",
+
+        data: {
+          block: block.block,
+          trial_id: block.block + "_" + (index + 1),
+          type: trial.type,
+          situation: trial.situation,
+          stage: "initial"
+        },
+
+        on_finish: function(data){
+          let r = data.response;
+          initial_value = Number(r.initial);
+          data.initial = initial_value;
+        }
+      });
+
+      // ===== 页面2：建议 + 最终判断 + 专业性评分 =====
+      timeline.push({
+        type: jsPsychSurveyHtmlForm,
+
+        preamble: function(){
+
+          let direction = Math.random() < 0.5 ? "increase" : "decrease";
+
+          advice_value = generateAdvice(initial_value, direction);
+
+          let text = direction === "increase"
+            ? trial.advice_high
+            : trial.advice_low;
+
+          return `
+            <p><strong>以下建议来自${block.source}</strong></p>
+            <p>${text}</p>
+            <p>建议数值：${advice_value}</p>
+            <hr>
+            <p>在阅读完该建议后，你的最终选择是？</p>
+            <p>0 = ${trial.option_low}，100 = ${trial.option_high}</p>
+          `;
+        },
+
+        html: `
+          <p>最终判断：</p>
+          <input name="final" type="number" min="0" max="100" required />
+
+          <p>你认为该${block.source}在处理这个情境问题上有多专业？</p>
+          <p>1=非常不专业，9=非常专业</p>
+          <input name="rating" type="number" min="1" max="9" required />
+        `,
+
+        button_label: "提交",
+
+        data: {
+          block: block.block,
+          trial_id: index + 1,
+          type: trial.type,
+          situation: trial.situation,
+          stage: "final"
+        },
+
+        on_finish: function(data){
+
+          let r = data.response;
+
+          let final_value = Number(r.final);
+          let rating_value = Number(r.rating);
+
+          data.final = final_value;
+          data.rating = rating_value;
+          data.initial = initial_value;
+          data.advice = advice_value;
+
+          // ⭐⭐⭐ 核心：计算WOA
+          if(advice_value !== initial_value){
+            data.WOA = (final_value - initial_value) / (advice_value - initial_value);
+          } else {
+            data.WOA = null;
+          }
+
+        }
+      });
+
+    });
+
+    // ===== block结束评分 =====
+    timeline.push({
+      type: jsPsychSurveyHtmlForm,
+      preamble: `<p>你认为该${block.source}在过去的整体表现（历史建议）有多可靠、稳定？（1=完全不可靠不稳定，9=完全可靠稳定）</p>`,
+      html: `<input name="reliability" type="number" min="1" max="9" required />`,
+      button_label: "提交"
+    });
+    timeline.push({
+      type: jsPsychSurveyHtmlForm,
+      preamble: `<p>综合以上的8个情境，你对该来源的建议有多信任？（1=完全不信任，9=完全信任）</p>`,
+      html: `<input name="trust" type="number" min="1" max="9" required />`,
+      button_label: "提交"
+    });
+
+  });
+
+  // ===== 所有block结束后的问卷 =====
+
+  timeline.push({
+    type: jsPsychSurveyHtmlForm,
+    preamble: "<p>在未来遇到类似的人际或情绪困扰时，你更倾向于向谁寻求建议？（0=完全AI，9=完全人类）</p>",
+    html: `<input name="emotion_choice" type="number" min="0" max="9" required />`,
+    button_label: "提交"
+  });
+
+  timeline.push({
+    type: jsPsychSurveyHtmlForm,
+    preamble: "<p>在未来遇到类似的客观任务或决策问题时，你更倾向于向谁寻求建议？（0=完全AI，9=完全人类）</p>",
+    html: `<input name="tool_choice" type="number" min="0" max="9" required />`,
+    button_label: "提交"
+  });
+
+  // ===== 结束页 =====
+  timeline.push({
+    type: jsPsychHtmlButtonResponse,
+    stimulus: "<h2>实验结束</h2>",
+    choices: ["完成"]
+  });
+
+  jsPsych.run(timeline);
+}
+
+let all_blocks = [];
+
+Promise.all([
+  d3.csv("materials/trials.csv"),
+  d3.csv("materials/blocks.csv")
+]).then(function(files){
+
+  all_trials = files[0];
+  all_blocks = files[1];
+
+  startExperiment();
+
+});
+
+</script>
+
+</html>
