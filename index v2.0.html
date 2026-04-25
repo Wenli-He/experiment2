@@ -14,6 +14,7 @@
   <script src="https://unpkg.com/@jspsych/plugin-html-button-response"></script>
   <script src="https://unpkg.com/@jspsych/plugin-survey-html-form"></script>
   <script src="https://unpkg.com/@jspsych/plugin-html-slider-response"></script>
+  <script src="https://unpkg.com/@jspsych-contrib/plugin-pipe"></script>
 
 </head>
 
@@ -75,14 +76,12 @@ const jsPsych = initJsPsych({
     let csv = Object.keys(result).join(",") + "\n" +
               Object.values(result).join(",");
 
-    // ===== 下载 =====
-    let blob = new Blob([csv], {type: "text/csv"});
-    let url = URL.createObjectURL(blob);
-
-    let a = document.createElement("a");
-    a.href = url;
-    a.download = "summary_data.csv";
-    a.click();
+    // 关键：上传到 Pavlovia
+    jsPsychPipe.saveData({
+      experiment_id: "在这里填你的ID",
+      filename: result.subject_id + ".csv",
+      data: JSON.stringify(result)
+    });
 
   }
 });
